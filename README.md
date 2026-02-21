@@ -1,23 +1,23 @@
-# 🌍 Disaster Type Prediction
+# Disaster Type Prediction
 
-## 📌 Project Overview
+## Project Overview
 This project aims to predict disaster types using the EM-DAT dataset.
 
-## 📊 Dataset
+## Dataset
 - Source: EM-DAT International Disaster Database
 - 10,643 records
 - 47 features
 
-## 🎯 Objective
+## Objective
 Predict disaster type based on:
 - Location
 - Time
 - Hazard characteristics
 
-## 🛠 Project Structure
+## Project Structure
 data/ → raw dataset  
 notebooks/ → EDA and analysis  
 src/ → preprocessing & model code  
 
-## 🚀 Status
+## Status
 Data Understanding Phase
