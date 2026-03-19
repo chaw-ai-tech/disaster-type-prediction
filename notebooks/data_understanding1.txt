@@ -7,33 +7,31 @@ to predict disaster types.
 
 ## Dataset Information
 - Source: EM-DAT International Disaster Database
-- Total records: 10643
+- Total records: 17756
 - Total features: 47
 This notebook focuses on exploratory data analysis (EDA).
 
 ## Dataset Dimensions
-The dataset contains 10643 rows and 47 columns.
+The dataset contains 17756 rows and 47 columns.
 Each row represents a recorded disaster event.
 Each column represents a feature describing the disaster.
 
 ## Target Variable: Disaster Type
-There are 14 unique disaster types in the dataset.
+There are 15 unique disaster types in the dataset.
 
 ## Class Imbalance Analysis
-The most frequent disaster type is 39.83%.
+The most frequent disaster type is 39.78%.
 The least frequent disaster type is 0.01%.
 The dataset appears to be: Highly Imbalanced
 This imbalance may affect model performance and 
 techniques such as class weighting or resampling 
 may be required.
 
-Most disasters occurred in Asia.
-This indicates geographic concentration of disaster events.
 
 # Summary of Data Understanding
-- Total records: 10643
+- Total records: 17756
 - Total features: 47
-- Number of disaster types: 14
+- Number of disaster types: 15
 - Dataset balance: (imbalanced)
 - Most common disaster: Flood
 - Key observations:
