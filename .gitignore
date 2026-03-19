@@ -1,4 +1,4 @@
-data/
+data/raw/*.xlsx
 __pycache__/
 .ipynb_checkpoints/
 .env

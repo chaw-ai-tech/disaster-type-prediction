@@ -1,0 +1,42 @@
+# Disaster Type Prediction – Data Understanding
+
+## Objective
+The objective of this project is to analyze the EM-DAT disaster dataset 
+and understand its structure before building a machine learning model 
+to predict disaster types.
+
+## Dataset Information
+- Source: EM-DAT International Disaster Database
+- Total records: 10643
+- Total features: 47
+This notebook focuses on exploratory data analysis (EDA).
+
+## Dataset Dimensions
+The dataset contains 10643 rows and 47 columns.
+Each row represents a recorded disaster event.
+Each column represents a feature describing the disaster.
+
+## Target Variable: Disaster Type
+There are 14 unique disaster types in the dataset.
+
+## Class Imbalance Analysis
+The most frequent disaster type is 39.83%.
+The least frequent disaster type is 0.01%.
+The dataset appears to be: Highly Imbalanced
+This imbalance may affect model performance and 
+techniques such as class weighting or resampling 
+may be required.
+
+Most disasters occurred in Asia.
+This indicates geographic concentration of disaster events.
+
+# Summary of Data Understanding
+- Total records: 10643
+- Total features: 47
+- Number of disaster types: 14
+- Dataset balance: (imbalanced)
+- Most common disaster: Flood
+- Key observations:
+  - Geographic concentration
+  - Temporal patterns
+  - Class imbalance issues
