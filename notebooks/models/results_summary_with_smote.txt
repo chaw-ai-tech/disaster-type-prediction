@@ -1,0 +1,11 @@
+======================================================================
+FINAL MODEL RESULTS SUMMARY (WITH SMOTE)
+======================================================================
+
+Best Model: XGBoost + SMOTE + Tuned HP
+Test F1-Macro: 0.7979
+Test Accuracy: 0.8578
+Features used: 33
+
+SMOTE Used: Yes
+Sampling Strategy: auto
