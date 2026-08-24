@@ -1,0 +1,27 @@
+# Class Grouping
+Flood-related disasters → Flood
+Flood
+Glacial lake outburst flood
+
+Landslide-related disasters → Landslide
+Mass movement (dry)
+Mass movement (wet)
+
+Earth-related disasters → Earthquake
+Earthquake
+Impact
+
+Disease-related disasters → Epidemic
+Epidemic
+Infestation
+Animal incident
+
+Temperature-related disasters → Extreme temperature
+Extreme temperature
+Fog
+
+Others remain the same:
+Storm
+Drought
+Wildfire
+Volcanic activity
