@@ -4,10 +4,10 @@ This project aims to predict different types of disasters using the EM-DAT Inter
 Machine learning techniques will be used to analyze historical disaster records and classify disaster events into their correct disaster type.
 
 The project follows a structured data science workflow including:
--Data Understanding
--Data Preprocessing
--Model Development
--Model Evaluation
+- Data Understanding
+- Data Preprocessing
+- Model Development
+- Model Evaluation
 
 Dataset
 Source: EM-DAT International Disaster Database
