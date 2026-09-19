@@ -1,0 +1,7 @@
+Model,Accuracy,F1 Macro,F1 Weighted,Precision Macro,Precision Weighted,Recall Macro,Recall Weighted
+LightGBM,0.9062,0.809,0.898,0.854,0.8982,0.7832,0.9062
+Random Forest,0.8941,0.7992,0.8894,0.8216,0.8873,0.7832,0.8941
+XGBoost,0.9056,0.797,0.8947,0.8557,0.8968,0.7696,0.9056
+Decision Tree,0.8867,0.7951,0.8844,0.8016,0.8826,0.7895,0.8867
+Logistic Regression,0.8887,0.7308,0.8655,0.8525,0.8772,0.705,0.8887
+SVM,0.8858,0.6783,0.8483,0.8562,0.868,0.6723,0.8858
