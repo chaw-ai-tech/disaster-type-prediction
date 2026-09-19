@@ -1,4 +1,0 @@
-Model,CV F1-Mac,Test Accuracy,Test F1-Mac,Test F1-Wtd,Test Precision,Test Recall
-XGBoost (Tuned),0.8238,0.9087,0.8179,0.9023,0.8515,0.7964
-LightGBM (Tuned),0.8183,0.905,0.811,0.8984,0.8434,0.7902
-Random Forest (Tuned),0.825,0.8924,0.7947,0.8879,0.815,0.7799

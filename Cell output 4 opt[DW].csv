@@ -1,4 +1,0 @@
-Model,CV F1-Mac,Test Accuracy,Test F1-Mac,Test F1-Wtd,Test Precision,Test Recall
-Random Forest (Optuna),0.8231,0.8744,0.8095,0.8817,0.7875,0.8471
-LightGBM (Optuna),0.815,0.8584,0.804,0.8697,0.7791,0.8644
-XGBoost (Optuna),0.8077,0.8529,0.8022,0.8656,0.7771,0.8743
