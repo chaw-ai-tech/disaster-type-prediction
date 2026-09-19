@@ -24,4 +24,4 @@ Others remain the same:
 Storm
 Drought
 Wildfire
-Volcanic activity
+Volcanic activity * remove *
