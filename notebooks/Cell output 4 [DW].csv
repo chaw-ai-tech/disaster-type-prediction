@@ -1,0 +1,7 @@
+Model,Train Accuracy,Test Accuracy,Train Macro-F1,Test Macro-F1,Test Weighted-F1,Train-Test Gap
+XGBoost,0.9997,0.9691,0.9993,0.9314,0.9679,0.068
+LightGBM,0.9993,0.968,0.9985,0.9308,0.9679,0.0677
+Random Forest,1.0,0.9642,1.0,0.9089,0.9606,0.0911
+Logistic Regression,0.8901,0.8841,0.8502,0.8414,0.8995,0.0088
+Decision Tree,0.8017,0.7957,0.5045,0.5005,0.7673,0.004
+SVM,0.0466,0.0515,0.0378,0.0459,0.0308,-0.0081
