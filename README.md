@@ -19,7 +19,7 @@ A Senior Project that integrates **Multi-class Disaster Event Classification (Ra
    - Explains *why* the model made each decision, both for correct cases and hard misclassified cases.
 4. **LLM Auditor Chat (Claude or Gemini)**:
    - Ask questions about the active case; answers are grounded in its predictions and SHAP drivers.
-   - Choose Anthropic Claude or Google Gemini in the sidebar and paste an API key (or set `ANTHROPIC_API_KEY` / `GEMINI_API_KEY`).
+   - Choose Anthropic Claude or Google Gemini in the sidebar and paste an API key, or save it once in `.streamlit/secrets.toml` (git-ignored) as `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` so it loads on every start. Environment variables and a `.env` file work too; `LLM_PROVIDER = "gemini"` or `"claude"` picks the starting provider.
    - Falls back to a **Local Auditor Engine** summary when no API key is provided.
 
 ---

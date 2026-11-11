@@ -47,7 +47,8 @@ class ModelRegistry:
         disaster_type: Optional[str] = None,
         only_hard: bool = False,
         only_disagreement: bool = False,
-        region: Optional[str] = None
+        region: Optional[str] = None,
+        misclassified_by: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         filtered = self.cases
         if disaster_type and disaster_type.lower() != "all":
@@ -59,6 +60,8 @@ class ModelRegistry:
             filtered = [c for c in filtered if c.get("is_disagreement", False)]
         if region and region.lower() != "all":
             filtered = [c for c in filtered if c["summary"]["region"].lower() == region.lower()]
+        if misclassified_by:
+            filtered = [c for c in filtered if not c["evaluations"][misclassified_by]["is_correct"]]
 
         if not filtered:
             return None

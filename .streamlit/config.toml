@@ -24,5 +24,6 @@ gatherUsageStats = false
 
 [server]
 headless = true
-enableCORS = false
-enableXsrfProtection = false
+# CORS and XSRF protection stay on (Streamlit's defaults): the app is shared publicly.
+enableCORS = true
+enableXsrfProtection = true

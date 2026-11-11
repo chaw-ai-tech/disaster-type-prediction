@@ -4,14 +4,22 @@ from datetime import datetime
 
 import pandas as pd
 import streamlit as st
+from dotenv import load_dotenv
 from sklearn.metrics import f1_score
 
-from src.agent import DisasterAuditorLLM
+# Keys in a local .env file become environment variables (already-set variables win).
+load_dotenv()
+
+from src.agent import RESTART, DisasterAuditorLLM
+from src.auditor_agent import AuditorTools, ClaudeAuditorAgent
 from src.models.registry import ModelRegistry
+
+# One minimal mark for the whole app: browser tab, sidebar title, assistant avatar and greeting.
+APP_ICON = ":material/cyclone:"
 
 st.set_page_config(
     page_title="Disaster Auditor",
-    page_icon=":material/shield:",
+    page_icon=APP_ICON,
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -46,17 +54,31 @@ st.html("""
         box-shadow: 0 0.25rem 1.25rem rgba(31, 30, 29, 0.07);
     }
 
+    /* Thin scrollbar when a long draft overflows the box */
+    [data-testid="stChatInputTextArea"] { scrollbar-width: thin; }
+
     /* Toolbar sits inside the composer's bottom edge, left of the send button */
-    .st-key-composer { gap: 0; }
+    .st-key-composer { gap: 0; container-type: inline-size; }
     .st-key-composer_tools {
         margin-top: -2.9rem;
         padding: 0 3.4rem 0.45rem 0.6rem;
         position: relative;
         z-index: 2;
         pointer-events: none;
+        flex-wrap: nowrap;  /* never let the model picker drop out of the box */
     }
     .st-key-composer_tools > * { pointer-events: auto; }
     .st-key-composer_tools [data-testid="stElementContainer"] { margin: 0; }
+    .st-key-composer_tools > :nth-child(2) { min-width: 0; }  /* the spacer gives way first */
+
+    /* "+" reads as a plain icon button: drop the menu chevron */
+    .st-key-quick_menu [data-testid="stMenuButtonButton"] [data-testid="stIconMaterial"] { display: none; }
+
+    /* Narrow composer: icon-only toggle and a slimmer model picker */
+    @container (max-width: 420px) {
+        .st-key-composer_tools [data-testid="stCheckbox"]:has(input[aria-label="Compare"]) [data-testid="stMarkdownContainer"] { display: none; }
+        .st-key-model_picker { width: 7.5rem !important; }
+    }
 
     /* Model picker reads as plain text, like a chat app's model name */
     .st-key-model_picker [data-baseweb="select"] > div {
@@ -102,17 +124,119 @@ st.html("""
     }
     #slash-menu .slash-desc { font-size: 0.85rem; color: #5E5D59; }
 
+    /* Responsive frame: in Chat view the header, messages and composer share one wide column that
+       fills the page; the cap only kicks in on very wide monitors so lines stay readable */
+    .st-key-chat_column, .st-key-topbar_chat {
+        max-width: 80rem;
+        margin-left: auto;
+        margin-right: auto;
+        width: 100%;
+    }
+    /* ...but the composer stays a comfortable centered width under the wide messages */
+    .st-key-chat_column .st-key-composer_dock,
+    .st-key-chat_column .st-key-quick_pills {
+        max-width: 48rem;
+        width: 100%;
+        margin-left: auto;
+        margin-right: auto;
+    }
+    /* Start-screen suggestion chips sit centered under the composer */
+    .st-key-quick_pills [role="radiogroup"] { justify-content: center; }
+    /* Message list fills the viewport instead of a fixed 600px, leaving room for header and composer */
+    /* (Streamlit also pins the layout wrapper with flex: 0 0 600px, so size both) */
+    [data-testid="stLayoutWrapper"]:has(> .st-key-chat_scroll) { flex: 0 0 auto !important; }
+    [data-testid="stLayoutWrapper"]:has(> .st-key-chat_scroll),
+    .st-key-chat_scroll {
+        height: calc(100dvh - 19rem) !important;
+        min-height: 16rem;
+    }
+    /* In a conversation the composer dock is pinned to the bottom of the viewport: messages scroll
+       behind it and it never gets pushed down. (Sticky goes on the dock's layout wrapper, the
+       element that is a direct child of the chat column, or it would have no room to stick in.) */
+    [data-testid="stVerticalBlock"]:has(.st-key-chat_scroll) > [data-testid="stLayoutWrapper"]:has(> .st-key-composer_dock) {
+        position: sticky;
+        bottom: 0;
+        z-index: 5;
+        background: #FAF9F5;
+        padding: 0.5rem 0 1rem;
+        box-shadow: 0 -1rem 1rem -0.5rem #FAF9F5;  /* soft fade where messages pass underneath */
+    }
+    /* First question from the start screen: the message list takes the start screen's slot, and
+       Streamlit keeps that screen's old children inside it (greyed out) until the reply finishes.
+       Hide those leftovers so the greeting, chips and old composer vanish immediately. */
+    .st-key-chat_scroll > [data-stale="true"]:not(:has([data-testid="stChatMessage"])),
+    .st-key-chat_scroll [data-testid="stLayoutWrapper"]:has(> .st-key-composer_dock),
+    .st-key-chat_scroll .st-key-quick_pills {
+        display: none !important;
+    }
+
+    /* Top bar (model + Macro-F1 + view switcher) stays pinned just under Streamlit's 3.75rem header
+       in every view, with the page color behind it so content scrolls cleanly underneath. */
+    [data-testid="stLayoutWrapper"]:has(> .st-key-topbar),
+    [data-testid="stLayoutWrapper"]:has(> .st-key-topbar_chat) {
+        position: sticky;
+        top: 3.75rem;
+        z-index: 6;
+        background: #FAF9F5;
+        padding: 0.25rem 0 0.5rem;
+        box-shadow: 0 1rem 1rem -0.5rem #FAF9F5;  /* soft fade where content passes underneath */
+    }
+
+    /* Chat view with a conversation: the page itself never scrolls. Every level from the page
+       container down to the message list becomes a flex column, so the list takes exactly the
+       space left between the top bar and the composer and is the only thing that scrolls. */
+    [data-testid="stMain"]:has(.st-key-chat_column .st-key-chat_scroll) { overflow: hidden; }
+    [data-testid="stMainBlockContainer"]:has(.st-key-chat_column .st-key-chat_scroll) {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        box-sizing: border-box;
+    }
+    [data-testid="stMainBlockContainer"]:has(.st-key-chat_column .st-key-chat_scroll) > [data-testid="stVerticalBlock"],
+    [data-testid="stLayoutWrapper"]:has(> .st-key-chat_column),
+    .st-key-chat_column {
+        flex: 1 1 0 !important;
+        min-height: 0;
+    }
+    .st-key-chat_column [data-testid="stLayoutWrapper"]:has(> .st-key-chat_scroll),
+    .st-key-chat_column .st-key-chat_scroll {
+        flex: 1 1 0 !important;
+        height: auto !important;
+        min-height: 0;
+    }
+
+    /* Drop Streamlit's default 10rem bottom padding while chatting, so the page itself doesn't scroll */
+    [data-testid="stMainBlockContainer"]:has(.st-key-chat_scroll) { padding-bottom: 0; }
+
+    @media (max-width: 640px) {
+        /* Phones: tighter page gutters, header stacks with the view switcher full width */
+        [data-testid="stMainBlockContainer"] { padding-left: 1rem; padding-right: 1rem; padding-bottom: 2rem; }
+        .st-key-topbar, .st-key-topbar_chat { flex-wrap: wrap; row-gap: 0.5rem; }
+        [data-testid="stLayoutWrapper"]:has(> .st-key-chat_scroll),
+        .st-key-chat_scroll { height: calc(100dvh - 21rem) !important; }  /* header wraps to two rows here */
+        [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) { max-width: 92%; }
+    }
+
     /* Start-screen greeting */
     .greeting {
         font-family: 'Source Serif 4', Georgia, serif;
-        font-size: 2.3rem;
+        font-size: clamp(1.55rem, 4.5vw, 2.3rem);
+        line-height: 1.25;
         font-weight: 400;
         letter-spacing: -0.01em;
         color: #1F1E1D;
         text-align: center;
         margin: 0;
     }
-    .greeting-mark { color: #C15F3C; margin-right: 0.35rem; }
+    /* The greeting mark is the app icon, drawn with Streamlit's Material Symbols font */
+    .greeting-mark {
+        font-family: 'Material Symbols Rounded';
+        font-weight: 400;
+        font-size: 0.95em;
+        vertical-align: -0.12em;
+        color: #C15F3C;
+        margin-right: 0.4rem;
+    }
 </style>
 """)
 
@@ -123,6 +247,15 @@ def load_registry():
 
 
 registry = load_registry()
+
+
+@st.cache_resource
+def load_agent_tools(_registry):
+    # Precomputes the per-class error breakdown once per server process.
+    return AuditorTools(_registry)
+
+
+agent_tools = load_agent_tools(registry)
 
 VIEWS = ["Chat", "Chat + details", "Benchmarks"]
 
@@ -239,6 +372,27 @@ def new_stats():
     return {"tested": 0, "correct": 0, "hard_cases": 0, "y_true": [], "y_pred": []}
 
 
+def config_value(name: str) -> str:
+    """A setting from .streamlit/secrets.toml, else the environment (which .env feeds), else ""."""
+    try:
+        value = st.secrets.get(name)
+    except Exception:  # no secrets file at all
+        value = None
+    return str(value or os.getenv(name, "")).strip()
+
+
+def default_provider() -> str:
+    """LLM_PROVIDER if set ("gemini" / "claude"); otherwise whichever provider has a key, Gemini first."""
+    choice = config_value("LLM_PROVIDER").lower()
+    if choice in ("claude", "anthropic"):
+        return "Anthropic Claude"
+    if choice == "gemini":
+        return "Google Gemini"
+    if not config_value("GEMINI_API_KEY") and config_value("ANTHROPIC_API_KEY"):
+        return "Anthropic Claude"
+    return "Google Gemini"
+
+
 DEFAULTS = {
     "messages": [],
     "selected_model": "Random Forest",
@@ -247,11 +401,15 @@ DEFAULTS = {
     "layout_mode": "Chat",
     "last_audit": None,
     "hard_threshold": 0.55,
-    "api_provider": "Google Gemini",
-    "gemini_api_key": os.getenv("GEMINI_API_KEY", ""),
-    "claude_api_key": os.getenv("ANTHROPIC_API_KEY", ""),
+    "api_provider": default_provider(),
+    "gemini_api_key": config_value("GEMINI_API_KEY"),
+    "claude_api_key": config_value("ANTHROPIC_API_KEY"),
+    # Only needed for organization-level keys that aren't scoped to a workspace.
+    "claude_workspace_id": config_value("ANTHROPIC_WORKSPACE_ID"),
     "pending_quick_action": None,
     "pending_question": None,
+    # Claude's Messages API transcript (tool calls and results included); only ever appended to.
+    "agent_history": [],
 }
 for k, v in DEFAULTS.items():
     if k not in st.session_state:
@@ -272,7 +430,17 @@ def active_models():
 def record_audit(case, models_to_test):
     """Run the audit, store it as the active case, and update the session scoreboard."""
     audit_result = registry.audit_case(case, models_to_test)
+    register_audit(audit_result, models_to_test)
+    return audit_result
+
+
+def register_audit(audit_result, models_to_test):
+    """Make an audit the active case and score it (skipped if it's the case already on screen)."""
+    case = audit_result["case"]
+    previous = st.session_state.last_audit
     st.session_state.last_audit = audit_result
+    if previous is not None and previous["case"]["case_id"] == case["case_id"]:
+        return
 
     stats = st.session_state.stats
     primary = audit_result["models"][models_to_test[0]]
@@ -284,7 +452,6 @@ def record_audit(case, models_to_test):
     # Hard case: misclassified, or correct but below the confidence threshold.
     if not primary["is_correct"] or primary["prediction"]["confidence"] < st.session_state.hard_threshold:
         stats["hard_cases"] += 1
-    return audit_result
 
 
 def session_macro_f1():
@@ -362,11 +529,95 @@ def submit_question(text: str):
     st.rerun()
 
 
+def claude_agent_enabled():
+    return st.session_state.api_provider == "Anthropic Claude" and bool(st.session_state.claude_api_key.strip())
+
+
 def answer_pending_question():
-    """Optionally audit a case the question asks for, then stream the LLM reply."""
     question = st.session_state.pending_question
     st.session_state.pending_question = None
+    if claude_agent_enabled():
+        answer_with_agent(question)
+    else:
+        answer_with_plain_llm(question)
 
+
+def ui_context():
+    parts = []
+    audit = st.session_state.last_audit
+    if audit:
+        c = audit["case"]
+        s_ = c["summary"]
+        parts.append(
+            f"case open on screen: {c['case_id']} (ground truth {c['ground_truth_class']}; "
+            f"{s_['country']}, {s_['region']}, month {s_['start_month']})"
+        )
+    parts.append(f"selected models: {', '.join(active_models())}")
+    return "[UI context] " + "; ".join(parts)
+
+
+def steps_label(steps):
+    n = len(steps)
+    return f"Used {n} tool{'s' if n != 1 else ''}" if n else "Answered directly"
+
+
+def render_step(step):
+    with st.status(step["label"], type="step", state="error" if step["is_error"] else "complete"):
+        st.caption(step["detail"])
+
+
+def answer_with_agent(question):
+    """Claude decides which registry tools to call; steps, case cards and the answer render as they arrive."""
+    agent = ClaudeAuditorAgent(
+        agent_tools,
+        st.session_state.claude_api_key.strip(),
+        workspace_id=st.session_state.claude_workspace_id,
+    )
+    text, steps, audits, error = "", [], [], None
+
+    with st.chat_message("assistant", avatar=APP_ICON):
+        steps_box = st.status(":shimmer[Working on it]", type="compact")
+        cards_box = st.container()
+        answer_ph = st.empty()
+
+        for kind, payload in agent.run_turn(
+            st.session_state.agent_history, f"{ui_context()}\n\n{question}", active_models()
+        ):
+            if kind == "text":
+                text += payload
+                answer_ph.markdown(text)
+            elif kind == "retract":
+                # A request attempt failed mid-stream and is being retried; drop its partial text.
+                text = text[:-payload]
+                answer_ph.markdown(text)
+            elif kind == "tool":
+                step = {
+                    "label": payload["summary"],
+                    "is_error": payload["is_error"],
+                    "detail": f"`{payload['name']}` {json.dumps(payload['input'], ensure_ascii=False)}",
+                }
+                steps.append(step)
+                with steps_box:
+                    render_step(step)
+                if payload["audit"]:
+                    register_audit(payload["audit"], payload["models"])
+                    audits.append({"audit": payload["audit"], "models": payload["models"]})
+                    with cards_box:
+                        render_audit_card(payload["audit"], payload["models"], f"live_{len(audits)}")
+            elif kind == "error":
+                error = payload
+
+        if error:
+            text += ("\n\n" if text else "") + f":orange[:material/warning:] {error}"
+            answer_ph.markdown(text)
+        steps_box.update(label=steps_label(steps), state="error" if error and not steps else "complete")
+
+    st.session_state.messages.append({"role": "assistant", "content": text, "steps": steps, "audits": audits})
+    st.rerun()
+
+
+def answer_with_plain_llm(question):
+    """Gemini or the local fallback: audit a case if the question asks for one, then stream a reply."""
     lower_q = question.lower()
     test_keywords = ["สุ่ม", "audit", "test", "case", "ลอง", "random", "hard", "ผิด", "misclassified", "เคส"]
     if any(w in lower_q for w in test_keywords):
@@ -388,12 +639,16 @@ def answer_pending_question():
         for m in st.session_state.messages[:-1]
         if m.get("content")
     ]
-    with st.chat_message("assistant", avatar=":material/shield:"):
-        reply = st.write_stream(llm.chat_stream(
+    with st.chat_message("assistant", avatar=APP_ICON):
+        reply, answer_ph = "", st.empty()
+        for piece in llm.chat_stream(
             user_message=question,
             history=history,
             current_case=st.session_state.last_audit,
-        ))
+        ):
+            # RESTART: the model failed mid-answer and a fallback model is starting over.
+            reply = "" if piece is RESTART else reply + piece
+            answer_ph.markdown(reply)
     st.session_state.messages.append({"role": "assistant", "content": reply})
     st.rerun()
 
@@ -408,7 +663,7 @@ def verdict_badge(is_correct):
         st.badge("Misclassified", icon=":material/close:", color="red")
 
 
-def render_audit_card(audit, tested_models, msg_idx):
+def render_audit_card(audit, tested_models, key_suffix):
     case = audit["case"]
     summary = case["summary"]
     with st.container(border=True):
@@ -440,7 +695,7 @@ def render_audit_card(audit, tested_models, msg_idx):
 
         is_latest = audit is st.session_state.last_audit
         if is_latest and st.session_state.layout_mode == "Chat":
-            if st.button("Open details", icon=":material/right_panel_open:", type="tertiary", key=f"details_{msg_idx}"):
+            if st.button("Open details", icon=":material/right_panel_open:", type="tertiary", key=f"details_{key_suffix}"):
                 st.session_state.layout_mode = "Chat + details"
                 st.rerun()
 
@@ -450,9 +705,15 @@ def render_message(msg, idx):
         with st.chat_message("user"):
             st.markdown(msg["content"])
         return
-    with st.chat_message("assistant", avatar=":material/shield:"):
+    with st.chat_message("assistant", avatar=APP_ICON):
+        if msg.get("steps"):
+            with st.expander(steps_label(msg["steps"]), type="compact"):
+                for step in msg["steps"]:
+                    render_step(step)
         if msg.get("audit"):
             render_audit_card(msg["audit"], msg.get("models_tested", [st.session_state.selected_model]), idx)
+        for j, item in enumerate(msg.get("audits", [])):
+            render_audit_card(item["audit"], item["models"], f"{idx}_{j}")
         if msg.get("content"):
             st.markdown(msg["content"])
 
@@ -463,39 +724,43 @@ def sync_model_picker():
 
 
 def render_composer(placeholder):
-    """Claude-style composer: text box with + on the bottom left and the model picker bottom right."""
-    with st.container(key="composer"):
-        user_query = st.chat_input(placeholder, submit_mode="disable", height=110)
-        with st.container(key="composer_tools", horizontal=True, vertical_alignment="center", gap="small"):
-            picked = st.menu_button(
-                ":material/add:",
-                options=list(QUICK_ACTIONS),
-                type="tertiary",
-                key="quick_menu",
-                help="Quick audit",
-            )
-            st.space("stretch")
-            compare = st.toggle("Compare", value=st.session_state.comparison_mode)
-            st.selectbox(
-                "Active model",
-                options=registry.available_models,
-                index=registry.available_models.index(st.session_state.selected_model),
-                key="model_picker",
-                on_change=sync_model_picker,
-                label_visibility="collapsed",
-                width=150,
-            )
+    """Claude-style composer: text box with + on the bottom left and the model picker bottom right.
 
-    if st.session_state.comparison_mode:
-        selected_comps = st.pills(
-            "Models to compare",
-            options=registry.available_models,
-            default=st.session_state.comparison_models,
-            selection_mode="multi",
-            label_visibility="collapsed",
-        )
-        if selected_comps and list(selected_comps) != st.session_state.comparison_models:
-            st.session_state.comparison_models = list(selected_comps)
+    Everything lives in one dock so that, in a conversation, CSS can pin it to the bottom of the viewport.
+    """
+    with st.container(key="composer_dock", gap="small"):
+        with st.container(key="composer"):
+            user_query = st.chat_input(placeholder, submit_mode="disable", height=110)
+            with st.container(key="composer_tools", horizontal=True, vertical_alignment="center", gap="small"):
+                picked = st.menu_button(
+                    ":material/add:",
+                    options=list(QUICK_ACTIONS),
+                    type="tertiary",
+                    key="quick_menu",
+                    help="Quick audit",
+                )
+                st.space("stretch")
+                compare = st.toggle("Compare", value=st.session_state.comparison_mode)
+                st.selectbox(
+                    "Active model",
+                    options=registry.available_models,
+                    index=registry.available_models.index(st.session_state.selected_model),
+                    key="model_picker",
+                    on_change=sync_model_picker,
+                    label_visibility="collapsed",
+                    width=150,
+                )
+
+        if st.session_state.comparison_mode:
+            selected_comps = st.pills(
+                "Models to compare",
+                options=registry.available_models,
+                default=st.session_state.comparison_models,
+                selection_mode="multi",
+                label_visibility="collapsed",
+            )
+            if selected_comps and list(selected_comps) != st.session_state.comparison_models:
+                st.session_state.comparison_models = list(selected_comps)
 
     if compare != st.session_state.comparison_mode:
         st.session_state.comparison_mode = compare
@@ -524,34 +789,41 @@ def greeting_text():
 
 
 def render_chat(composer_placeholder):
+    # Streamlit matches elements between runs by position and keeps unmatched old ones on screen
+    # (greyed out) until the run ends. So the start screen is ONE container in slot 0, and the
+    # conversation's message list takes that same slot: the greeting disappears the moment the
+    # first question is asked, instead of lingering while the answer streams.
     if not st.session_state.messages:
         # Start screen: greeting, centered composer, suggestion chips
-        st.space("large")
-        st.space("large")
-        st.html(
-            f'<p class="greeting"><span class="greeting-mark">✻</span>{greeting_text()}. '
-            "Which disaster model shall we audit?</p>"
-        )
-        st.space("medium")
-        user_query = render_composer(composer_placeholder)
-        st.pills(
-            "Suggestions",
-            options=list(QUICK_ACTIONS),
-            label_visibility="collapsed",
-            key="quick_pills",
-            on_change=queue_quick_action,
-        )
+        with st.container(key="start_screen"):
+            st.space("large")
+            st.space("large")
+            st.html(
+                f'<p class="greeting"><span class="greeting-mark">{APP_ICON.split("/")[1].strip(":")}</span>{greeting_text()}. '
+                "Which disaster model shall we audit?</p>"
+            )
+            st.space("medium")
+            user_query = render_composer(composer_placeholder)
+            st.pills(
+                "Suggestions",
+                options=list(QUICK_ACTIONS),
+                label_visibility="collapsed",
+                key="quick_pills",
+                on_change=queue_quick_action,
+            )
         handle_input(user_query)
         return
 
-    # Conversation: scrolling message area with the composer pinned below it
-    with st.container(height=600, border=False):
+    # Conversation: scrolling message area with the composer pinned below it.
+    # Height is overridden in CSS (.st-key-chat_scroll) to follow the viewport.
+    message_area = st.container(height=600, border=False, key="chat_scroll")
+    # Draw the composer before filling the messages so it is already in place while a reply streams.
+    user_query = render_composer(composer_placeholder)
+    with message_area:
         for i, msg in enumerate(st.session_state.messages):
             render_message(msg, i)
         if st.session_state.pending_question:
             answer_pending_question()
-
-    user_query = render_composer(composer_placeholder)
     handle_input(user_query)
 
 
@@ -681,13 +953,14 @@ def render_export():
 # Sidebar: new audit, session, settings
 # -------------------------------------------------------------
 with st.sidebar:
-    st.markdown("### :material/shield: Disaster Auditor")
+    st.markdown(f"### {APP_ICON} Disaster Auditor")
 
     if st.button("New audit", icon=":material/edit_square:", type="primary", width="stretch"):
         st.session_state.messages = []
         st.session_state.stats = new_stats()
         st.session_state.last_audit = None
         st.session_state.pending_question = None
+        st.session_state.agent_history = []
         st.rerun()
 
     st.markdown("**This session**")
@@ -717,7 +990,7 @@ with st.sidebar:
     is_gemini = st.session_state.api_provider == "Google Gemini"
     active_key = st.session_state.gemini_api_key if is_gemini else st.session_state.claude_api_key
     llm_connected = bool(active_key and active_key.strip())
-    llm_label = "Gemini" if is_gemini else "Claude Opus 5.5"
+    llm_label = "Gemini (chat)" if is_gemini else "Claude Opus 5.5 (agent with tools)"
 
     with st.expander("Settings", icon=":material/settings:", expanded=not llm_connected):
         prov_choice = st.selectbox(
@@ -758,6 +1031,15 @@ with st.sidebar:
             elif ant_key != st.session_state.claude_api_key:
                 st.session_state.claude_api_key = ant_key
                 st.rerun()
+            ws_id = st.text_input(
+                "Workspace ID (optional)",
+                value=st.session_state.claude_workspace_id,
+                placeholder="wrkspc_...",
+                help="Only needed if your key isn't scoped to a workspace. Copy it from the Claude Console's Workspaces page.",
+            )
+            if ws_id.strip() != st.session_state.claude_workspace_id:
+                st.session_state.claude_workspace_id = ws_id.strip()
+                st.rerun()
 
         st.session_state.hard_threshold = st.slider(
             "Hard-case confidence threshold",
@@ -780,7 +1062,9 @@ with st.sidebar:
 # -------------------------------------------------------------
 # Main area
 # -------------------------------------------------------------
-with st.container(horizontal=True, vertical_alignment="center"):
+# In Chat view the header narrows to the same centered column as the conversation.
+topbar_key = "topbar_chat" if st.session_state.layout_mode == "Chat" else "topbar"
+with st.container(horizontal=True, vertical_alignment="center", key=topbar_key):
     st.markdown(
         f"**{st.session_state.selected_model}** · test Macro-F1 "
         f"{registry.leaderboard[st.session_state.selected_model]['macro_f1']:.4f}"
@@ -806,8 +1090,7 @@ COMPOSER = "Ask about a case, or type / for commands"
 view = st.session_state.layout_mode
 
 if view == "Chat":
-    _, center, _ = st.columns([1, 2.6, 1])
-    with center:
+    with st.container(key="chat_column"):
         render_chat(COMPOSER)
 
 elif view == "Chat + details":

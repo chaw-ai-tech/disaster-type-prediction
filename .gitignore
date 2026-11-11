@@ -9,3 +9,4 @@ __pycache__/
 .agents/
 .claude/
 .streamlit/credentials.toml
+.streamlit/secrets.toml

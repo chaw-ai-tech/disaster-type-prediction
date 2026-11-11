@@ -20,12 +20,31 @@ THE 3 LEAK-FREE MODELS COMPARED:
 
 GUIDELINES:
 - Answer user questions informatively, clearly, and authoritatively.
+- Be concise: lead with the answer, then at most 3-5 short bullets or ~150 words, unless the user asks for more detail.
 - Support both Thai and English naturally: if the user asks in Thai, reply in fluent, polite Thai (ครับ/ค่ะ); if in English, reply in English.
 - If an active audit case is provided in the context, refer to its specific metrics, ground truth, predicted class, confidence, and SHAP features.
 - If asked about how models work or error diagnostics, explain the physical and seasonal disaster dynamics (e.g. why missing magnitude scales sway models toward floods, or how event duration influences epidemics vs. earthquakes)."""
 
+# Fast, current models in order of preference (measured on this project: ~1-2s to the first word).
+# Override with GEMINI_MODEL in .streamlit/secrets.toml or the environment, e.g. "gemini-3.5-flash"
+# or a comma-separated list.
+DEFAULT_GEMINI_MODELS = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.5-flash"]
+GEMINI_TIMEOUT_MS = 30_000
+
+# Yielded by chat_stream when a model failed mid-answer and the next one starts over: drop the text so far.
+RESTART = object()
+
+
+def gemini_models() -> List[str]:
+    configured = [m.strip() for m in os.getenv("GEMINI_MODEL", "").split(",") if m.strip()]
+    return configured + [m for m in DEFAULT_GEMINI_MODELS if m not in configured]
+
+
 class DisasterAuditorLLM:
-    """Multi-provider LLM interface supporting Google Gemini and Anthropic Claude."""
+    """Plain chat via Google Gemini, or a local summary when no key is set.
+
+    Claude runs as a tool-using agent instead; see src/auditor_agent.py.
+    """
 
     def __init__(self, provider: str = "gemini", api_key: Optional[str] = None):
         self.provider = provider.lower()
@@ -38,8 +57,6 @@ class DisasterAuditorLLM:
 
         if self.provider == "gemini" and self.api_key:
             yield from self._stream_gemini(prompt)
-        elif self.provider == "anthropic" and self.api_key:
-            yield from self._stream_anthropic(user_message, history or [], current_case)
         else:
             yield from self._stream_local_fallback(user_message, current_case)
 
@@ -61,98 +78,47 @@ class DisasterAuditorLLM:
         return full_prompt
 
     def _stream_gemini(self, prompt: str) -> Generator[str, None, None]:
+        """Stream from a pinned, fast model; fall back down a short list only if a model fails before answering.
+
+        The old version listed every model on the key before each request and tried them in API order,
+        so it burned seconds on retired (404) and image-only models and could land on an overloaded or
+        very slow model (one took 200s to start). Pinning avoids all of that.
+        """
         try:
             from google import genai
-            client = genai.Client(api_key=self.api_key)
-            
-            # Prioritize latest recommended model (gemini-3.8-flash)
-            models_to_try = ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-1.5-flash"]
-            try:
-                # Dynamically discover active models on this key
-                discovered = []
-                for m in client.models.list():
-                    m_id = getattr(m, "name", "") or ""
-                    clean_id = m_id.replace("models/", "")
-                    if "flash" in clean_id.lower() or "pro" in clean_id.lower():
-                        discovered.append(clean_id)
-                if discovered:
-                    # Put preferred 3.8-flash first if found, else discovered list
-                    if "gemini-3.8-flash" in discovered:
-                        discovered.remove("gemini-3.8-flash")
-                        discovered.insert(0, "gemini-3.8-flash")
-                    models_to_try = discovered + [m for m in models_to_try if m not in discovered]
-            except Exception:
-                pass
-
-            last_err = None
-            for model_name in models_to_try:
-                try:
-                    response = client.models.generate_content_stream(
-                        model=model_name,
-                        contents=prompt
-                    )
-                    for chunk in response:
-                        if hasattr(chunk, "text") and chunk.text:
-                            yield chunk.text
-                    return
-                except Exception as e:
-                    last_err = e
-                    continue
-
-            # If all fail, yield error
-            yield f"\n⚠️ Gemini API Error: {str(last_err)}. Please verify your Gemini API key in the sidebar."
-        except Exception as e:
-            yield f"\n⚠️ Gemini Connection Error: {str(e)}"
-
-    def _stream_anthropic(self, user_message: str, history: List[Dict[str, str]], current_case: Optional[Dict]) -> Generator[str, None, None]:
-        try:
-            import anthropic
+            from google.genai import types
         except ImportError:
-            yield "\n⚠️ The `anthropic` package is not installed. Run `pip install -r requirements.txt`."
+            yield "\n⚠️ The `google-genai` package is not installed. Run `pip install -r requirements.txt`."
             return
 
-        client = anthropic.Anthropic(api_key=self.api_key)
+        client = genai.Client(
+            api_key=self.api_key,
+            http_options=types.HttpOptions(
+                # Give up on a stalled model after 30s instead of waiting minutes, and don't let the
+                # SDK silently retry an overloaded model: the fallback list below handles that.
+                timeout=GEMINI_TIMEOUT_MS,
+                retry_options=types.HttpRetryOptions(attempts=1),
+            ),
+        )
 
-        # Recent turns only; the API requires the first message to be from the user.
-        messages = [
-            {"role": h["role"], "content": h["content"]}
-            for h in history[-6:]
-            if h.get("content") and h.get("role") in ("user", "assistant")
-        ]
-        while messages and messages[0]["role"] != "user":
-            messages.pop(0)
+        # Gemini's fast models answer ~1 in 5 requests with "503 high demand", sometimes mid-answer.
+        # Each failure moves on to the next model; if text was already shown, RESTART tells the
+        # caller to clear it so the user sees one clean answer.
+        last_err = None
+        for model_name in gemini_models():
+            started = False
+            try:
+                for chunk in client.models.generate_content_stream(model=model_name, contents=prompt):
+                    if getattr(chunk, "text", None):
+                        started = True
+                        yield chunk.text
+                return
+            except Exception as e:
+                last_err = e
+                if started:
+                    yield RESTART
 
-        context_str = self._case_context(current_case)
-        user_content = f"{context_str}\nUser Question:\n{user_message}" if context_str else user_message
-        messages.append({"role": "user", "content": user_content})
-
-        try:
-            with client.beta.messages.stream(
-                model="claude-opus-5-5",
-                max_tokens=16000,
-                system=SYSTEM_PROMPT,
-                messages=messages,
-                # Conversational Q&A: low effort keeps latency and cost down.
-                output_config={"effort": "low"},
-                # If a request is declined by a safety classifier, retry on a fallback model server-side.
-                betas=["server-side-fallback-2026-07-01"],
-                fallbacks="default",
-            ) as stream:
-                for text in stream.text_stream:
-                    yield text
-                final = stream.get_final_message()
-            if final.stop_reason == "refusal":
-                yield "\n⚠️ Claude declined to answer this request."
-            elif final.stop_reason == "max_tokens":
-                yield "\n⚠️ Response truncated (max_tokens reached)."
-        except anthropic.AuthenticationError:
-            yield "\n⚠️ Claude API Error: invalid Anthropic API key. Please check the key in the sidebar."
-        except anthropic.RateLimitError:
-            yield "\n⚠️ Claude API Error: rate limited. Please wait a moment and try again."
-        except anthropic.APIStatusError as e:
-            yield f"\n⚠️ Claude API Error ({e.status_code}): {e.message}"
-        except anthropic.APIConnectionError:
-            yield "\n⚠️ Claude Connection Error: could not reach the Anthropic API."
+        yield f"\n⚠️ Gemini API Error: {last_err}. Please verify your Gemini API key in the sidebar."
 
     def _stream_local_fallback(self, user_message: str, current_case: Optional[Dict]) -> Generator[str, None, None]:
         msg = user_message.lower()
